@@ -25,10 +25,6 @@ const verifyToken = (req, res, next) => {
       return res.status(401).json({ message: 'User ID not found in token' });
     }
     
-    // Check if the decoded user ID is a valid ObjectId
-    if (!mongoose.Types.ObjectId.isValid(decoded.userId)) {
-      return res.status(401).json({ message: 'Invalid user ID' });
-    }
 
 
     // Attach the user ID to the request object

@@ -1,10 +1,12 @@
 const express = require('express');
-const User = require('../models/userModel');
+// const User = require('../models/userModel');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const authMiddleware = require('../middlewares/authMiddleware');
 const adminAuthMiddleware = require('../middlewares/adminAuthMiddleware');
-const Order = require('../models/orderModel');
+// const Order = require('../models/orderModel');
+const admin = require('firebase-admin');
+const db = require('../../index');
 
 
 
@@ -37,27 +39,29 @@ router.post('/user/register', async (req, res) => {
     try{ 
         const {firstName, lastName, email, password, phone} = req.body;
 
-        const isUserExist = await User.findOne({ email });
+        const userSnapshot = await admin.firestore().collection('Users').where('email', '==', email).get();
 
-        if(isUserExist){ 
-            return res.status(401).json({message: 'Email is already in use!'});
+        if(!userSnapshot.empty){ 
+            return res.status(400).json({ 
+                message: "A user with this email alredy exist!"
+            })
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const user = User({ 
-            firstName: firstName,
-            lastName: lastName,
+        const user = await admin.firestore().collection('Users').add({ 
             email: email,
             password: hashedPassword,
-            phone: phone
+            phone: phone,
+            firstName: firstName,
+            lastName: lastName,
+            role: "User"
         });
-
-        user.save();
         res.status(200).json({ 
-            message: 'User created successfully!',
-            user: user
+            message: "User created successfully!",
+            userData: user
         })
+
     } catch (error){ 
         return res.status(401).send(error.message);
     }
@@ -87,33 +91,33 @@ router.post('/admin/register', async (req, res) => {
     try{ 
         const {firstName, lastName, email, password, phone} = req.body;
 
-        const isUserExist = await User.findOne({ email });
+        const userSnapshot = await admin.firestore().collection('Users').where('email', '==', email).get();
 
-        if(isUserExist){ 
-            return res.status(401).json({message: 'Email is already in use!'});
+        if(!userSnapshot.empty){ 
+            return res.status(400).json({ 
+                message: "A user with this email alredy exist!"
+            })
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const user = User({ 
-            firstName: firstName,
-            lastName: lastName,
+        const user = await admin.firestore().collection('Users').add({ 
             email: email,
             password: hashedPassword,
             phone: phone,
-            role: 'Admin'
+            firstName: firstName,
+            lastName: lastName,
+            role: "Admin"
         });
-
-        user.save();
         res.status(200).json({ 
-            message: 'Admin created successfully!',
-            user: user
+            message: "Admin user created successfully!",
+            userData: user
         })
+
     } catch (error){ 
         return res.status(401).send(error.message);
     }
 });
-
 
 ///////////////////////////////////////////
 /////////////////////////////////////////
@@ -132,24 +136,39 @@ router.post('/admin/register', async (req, res) => {
 
 
 router.post('/user/login', async (req, res) => { 
-    const {email, password} = req.body;
+    try { 
+        const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+        // Query Firestore for the user with the provided email
+        const userSnapshot = await admin.firestore().collection('Users').where('email', '==', email).get();
 
-    if(!user){ 
-        return res.status(400).json({message: 'User does not exist!'})
+        if(userSnapshot.empty){ 
+            return res.status(400).json({ 
+                message: "User not found!"
+            });
+        };
+
+        const passwordExist = bcrypt.compare(password, userSnapshot.docs[0].data().password);
+
+        if(!passwordExist){ 
+            return res.status(401).json({ 
+                message: "Invalid user password!"
+            })
+        }
+
+        const token = jwt.sign({userId: userSnapshot.docs[0].id}, process.env.SECRET_KEY);
+
+        res.status(200).json({ 
+            message: "User logged in successfully!",
+            token: token
+        })
+    } catch (error) { 
+        console.error('Error logging in:', error);
+        res.status(401).send(error.message);
     }
-
-    const passwordMatch = bcrypt.compare(password, user?.password);
-
-    if(!passwordMatch){ 
-        return res.status(400).json({message: 'Password does not match!'})
-    }
-
-    const token = jwt.sign({userId: user._id}, process.env.SECRET_KEY,);
-
-    res.status(200).json({message: 'Login Successful!', token: token, user: user});
 });
+``
+
 
 
 
@@ -173,25 +192,26 @@ router.post('/user/create-order', authMiddleware, async (req, res) => {
     try{ 
         const {items, totalOrderPrice, deliveryAddress, contactInfo, orderStatus, paymentStatus, orderDate, additionalNotes} = req.body;
         const userId = req.userId;
+
+        const orderData = {
+            userId: userId, // Optionally, add the userId to associate the order with a user
+            totalOrderPrice: totalOrderPrice,
+            deliveryAddress: deliveryAddress,
+            contactInfo: contactInfo,
+            orderStatus: orderStatus,
+            paymentStatus: paymentStatus,
+            orderDate: orderDate,
+            items: items,
+            additionalNotes: additionalNotes,
+        };
+
+        const orderRef = admin.firestore().collection('Orders').add({orderData});
+        res.status(200).json({ 
+            message: "Order created successfully!",
+            orderData: orderRef.id
+        })
         
-        const newOrder = Order({ 
-            userId,
-            items,
-            totalOrderPrice,
-            deliveryAddress,
-            contactInfo,
-            orderStatus,
-            paymentStatus,
-            orderDate,
-            additionalNotes
-        });
 
-        newOrder.save();
-
-        res.status(201).json({
-            message: 'Order created successfully!',
-            order: newOrder
-        });
 
     } catch (error){ 
         return res.status(400).json({
